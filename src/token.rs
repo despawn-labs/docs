@@ -60,12 +60,14 @@ pub enum Token {
     SemiColon, // ;
     Colon,     // :
 
+    Comma, // ,
+
     Label, // ::
 
     LongComment(i32, String), // --[=*[]=*]
     ShortComment(String),     // --
 
-    Number(String),
+    Number(f64),
     String(String),
     Name(String),
 
@@ -118,6 +120,7 @@ impl Token {
             b')' => Some(Token::RParen),
             b';' => Some(Token::SemiColon),
             b':' => Some(Token::Colon),
+            b',' => Some(Token::Comma),
             _ => None,
         }
     }
