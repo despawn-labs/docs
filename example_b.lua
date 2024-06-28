@@ -1,4 +1,3 @@
---[===[fuck]===]
--- example
-
-local d = "Hello\""
+if x == b then
+  return
+end

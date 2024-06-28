@@ -1,13 +1,10 @@
-pub mod char;
-pub mod lex;
-pub mod token;
+pub mod lang;
 
 use std::fs;
 
+use crate::lang::{Lex, Token};
 use anyhow::Result;
 use clap::Parser;
-use lex::Lex;
-use token::Token;
 
 #[derive(Parser, Debug)]
 #[command(version, about)]

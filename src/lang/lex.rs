@@ -1,12 +1,13 @@
 //! Adapted from https://github.com/LuaJIT/LuaJIT/blob/v2.1/src/lj_lex.c.
 
-use core::panic;
 use std::string::FromUtf8Error;
 
 use crate::{
-    char::{to_digit, CHAR_DIGIT, CHAR_HEX_DIGIT},
     char_is, char_is_digit, char_is_ident,
-    token::Token,
+    lang::{
+        char::{to_digit, CHAR_DIGIT, CHAR_HEX_DIGIT},
+        token::Token,
+    },
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -28,6 +29,9 @@ pub enum LexError {
 
     #[error("failed to parse string")]
     String,
+
+    #[error("unexpected token")]
+    Test,
 }
 
 pub type LexResult<T> = Result<T, LexError>;
@@ -40,6 +44,8 @@ pub struct Lex {
 
     char: u8,
     next_char_index: usize,
+
+    token: Token,
 }
 
 impl Lex {
@@ -50,7 +56,9 @@ impl Lex {
             work: vec![],
 
             char: 0,
-            next_char_index: 0,
+            next_char_index: 1,
+
+            token: Token::Eof,
         };
 
         s.char = s.input[0];
@@ -59,8 +67,20 @@ impl Lex {
     }
 
     pub fn next(&mut self) -> LexResult<Token> {
-        self.next_char();
-        self.scan()
+        self.token = self.scan()?;
+        Ok(self.token)
+    }
+
+    pub fn test<F: Fn(&Token) -> bool>(&mut self, f: F) -> LexResult<()> {
+        if !f(&self.token) {
+            Err(LexError::Test)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn token(&self) -> Token {
+        self.token
     }
 
     fn work_to_string(&self) -> LexResult<String> {
@@ -80,14 +100,6 @@ impl Lex {
         }
 
         self.char
-    }
-
-    fn peek_char(&mut self) -> u8 {
-        if self.next_char_index >= self.input.len() {
-            0
-        } else {
-            self.input[self.next_char_index]
-        }
     }
 
     fn take_char(&mut self) -> u8 {
@@ -187,6 +199,8 @@ impl Lex {
                 }
             }
         }
+
+        self.next_char();
 
         let result = self.work_to_string()?;
         Ok(result)
@@ -377,13 +391,7 @@ impl Lex {
                 self.work.clear();
 
                 while char_is_ident!(self.char) {
-                    self.work.push(self.char);
-
-                    if char_is_ident!(self.peek_char()) {
-                        self.next_char();
-                    } else {
-                        break;
-                    }
+                    self.take_char();
                 }
 
                 let s = self.work_to_string()?;
@@ -450,8 +458,10 @@ impl Lex {
                     self.next_char();
 
                     return Ok(if self.char != b'=' {
+                        self.next_char();
                         Token::Assign
                     } else {
+                        self.next_char();
                         Token::Eq
                     });
                 }
@@ -459,8 +469,10 @@ impl Lex {
                     self.next_char();
 
                     return Ok(if self.char != b'=' {
+                        self.next_char();
                         Token::Greater
                     } else {
+                        self.next_char();
                         Token::GreaterEq
                     });
                 }
@@ -468,8 +480,10 @@ impl Lex {
                     self.next_char();
 
                     return Ok(if self.char != b'=' {
+                        self.next_char();
                         Token::Less
                     } else {
+                        self.next_char();
                         Token::LessEq
                     });
                 }
@@ -477,6 +491,7 @@ impl Lex {
                     self.next_char();
 
                     if self.char == b'=' {
+                        self.next_char();
                         return Ok(Token::NotEq);
                     }
                 }
@@ -484,18 +499,22 @@ impl Lex {
                     self.next_char();
 
                     return Ok(if self.char != b':' {
+                        self.next_char();
                         Token::Colon
                     } else {
+                        self.next_char();
                         Token::Label
                     });
                 }
                 b'.' => {
-                    self.take_char();
+                    self.next_char();
 
                     if self.char == b'.' {
                         self.next_char();
 
                         if self.char == b'.' {
+                            self.next_char();
+
                             return Ok(Token::Dots);
                         }
 
@@ -511,6 +530,7 @@ impl Lex {
                 b'\'' | b'"' => return Ok(Token::String(self.take_string()?)),
                 0 => return Ok(Token::Eof),
                 c => {
+                    self.take_char();
                     return Token::from_char(c).ok_or(LexError::Char);
                 }
             }
