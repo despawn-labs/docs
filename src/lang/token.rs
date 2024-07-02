@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Token {
     And,
     Break,
@@ -67,11 +67,24 @@ pub enum Token {
     LongComment(i32, String), // --[=*[]=*]
     ShortComment(String),     // --
 
-    Number(f64),
-    String(String),
+    Number(f64, NumberKind),
+    String(String, StringKind),
     Name(String),
 
     Eof,
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub enum NumberKind {
+    Decimal,
+    Hexadecimal,
+    Binary,
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub enum StringKind {
+    Short,
+    Long(u32),
 }
 
 impl Token {
@@ -122,6 +135,41 @@ impl Token {
             b':' => Some(Token::Colon),
             b',' => Some(Token::Comma),
             _ => None,
+        }
+    }
+
+    pub fn is_name(&self) -> bool {
+        match self {
+            Token::Name(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_binary_operator(&self) -> bool {
+        match self {
+            Token::Add
+            | Token::Subtract
+            | Token::Multiply
+            | Token::Divide
+            | Token::Carrot
+            | Token::Modulus
+            | Token::Concat
+            | Token::Eq
+            | Token::NotEq
+            | Token::Less
+            | Token::LessEq
+            | Token::Greater
+            | Token::GreaterEq
+            | Token::And
+            | Token::Or => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_dot(&self) -> bool {
+        match self {
+            Token::Dot => true,
+            _ => false,
         }
     }
 }

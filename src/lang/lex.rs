@@ -10,6 +10,8 @@ use crate::{
     },
 };
 
+use super::token::{NumberKind, StringKind};
+
 #[derive(Debug, thiserror::Error)]
 pub enum LexError {
     #[error("failed to parse string: '{from}'")]
@@ -46,6 +48,9 @@ pub struct Lex {
     next_char_index: usize,
 
     token: Token,
+    peek_token: Option<Token>,
+
+    line_number: u32,
 }
 
 impl Lex {
@@ -59,6 +64,9 @@ impl Lex {
             next_char_index: 1,
 
             token: Token::Eof,
+            peek_token: None,
+
+            line_number: 0,
         };
 
         s.char = s.input[0];
@@ -67,20 +75,36 @@ impl Lex {
     }
 
     pub fn next(&mut self) -> LexResult<Token> {
-        self.token = self.scan()?;
-        Ok(self.token)
-    }
+        match &self.peek_token {
+            Some(v) => {
+                self.token = v.clone();
+                self.peek_token = None;
+            }
+            None => {
+                self.token = self.scan()?;
+            }
+        };
 
-    pub fn test<F: Fn(&Token) -> bool>(&mut self, f: F) -> LexResult<()> {
-        if !f(&self.token) {
-            Err(LexError::Test)
-        } else {
-            Ok(())
-        }
+        Ok(self.token.clone())
     }
 
     pub fn token(&self) -> Token {
-        self.token
+        self.token.clone()
+    }
+
+    pub fn peek(&mut self) -> LexResult<Token> {
+        match &self.peek_token {
+            Some(v) => Ok(v.clone()),
+            None => {
+                let v = self.scan()?;
+                self.peek_token = Some(v.clone());
+                Ok(v.clone())
+            }
+        }
+    }
+
+    pub fn line_number(&self) -> u32 {
+        self.line_number
     }
 
     fn work_to_string(&self) -> LexResult<String> {
@@ -110,6 +134,8 @@ impl Lex {
     fn take_newline(&mut self) {
         let last = self.char;
         assert!(self.is_end_of_line());
+
+        self.line_number += 1;
 
         self.next_char();
 
@@ -206,7 +232,7 @@ impl Lex {
         Ok(result)
     }
 
-    fn take_number(&mut self) -> LexResult<f64> {
+    fn take_number(&mut self) -> LexResult<(f64, NumberKind)> {
         let mut pc = self.char;
         let mut xp = b'e';
         if self.char == b'0' && self.take_char().to_ascii_lowercase() == b'x' {
@@ -236,16 +262,20 @@ impl Lex {
         let mut exp_start = 0usize;
         let mut exp_end = 0usize;
 
+        let mut kind = NumberKind::Decimal;
+
         if self.work.len() >= 2 {
             match (self.work[0], self.work[1].to_ascii_lowercase()) {
                 (b'0', b'x') => {
                     base = 16;
                     mask = CHAR_HEX_DIGIT;
                     dec_start = 2;
+                    kind = NumberKind::Hexadecimal;
                 }
                 (b'0', b'b') => {
                     base = 2;
                     dec_start = 2;
+                    kind = NumberKind::Binary;
                 }
                 _ => {}
             };
@@ -375,7 +405,7 @@ impl Lex {
             d *= 10f64.powf(e_val);
         }
 
-        Ok(d)
+        Ok((d, kind))
     }
 
     fn scan(&mut self) -> LexResult<Token> {
@@ -385,7 +415,8 @@ impl Lex {
             // Identifier or keyword.
             if char_is_ident!(self.char) {
                 if char_is_digit!(self.char) {
-                    return Ok(Token::Number(self.take_number()?));
+                    let r = self.take_number()?;
+                    return Ok(Token::Number(r.0, r.1));
                 }
 
                 self.work.clear();
@@ -445,7 +476,10 @@ impl Lex {
                         self.work.clear();
                         self.take_long_string(sep);
 
-                        return Ok(Token::String(self.work_to_string()?));
+                        return Ok(Token::String(
+                            self.work_to_string()?,
+                            StringKind::Long(sep as u32),
+                        ));
                     }
 
                     if sep == -1 {
@@ -525,9 +559,10 @@ impl Lex {
                         return Ok(Token::Dot);
                     }
 
-                    return Ok(Token::Number(self.take_number()?));
+                    let r = self.take_number()?;
+                    return Ok(Token::Number(r.0, r.1));
                 }
-                b'\'' | b'"' => return Ok(Token::String(self.take_string()?)),
+                b'\'' | b'"' => return Ok(Token::String(self.take_string()?, StringKind::Short)),
                 0 => return Ok(Token::Eof),
                 c => {
                     self.take_char();

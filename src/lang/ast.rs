@@ -1,7 +1,9 @@
+#[derive(Debug, Clone, PartialEq)]
 pub struct Block {
     pub statements: Vec<Statement>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Set(SetStatement),
     Call(CallStatement),
@@ -43,56 +45,67 @@ impl Statement {
     define_is!(is_last, Last);
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct SetStatement {
     pub variables: Vec<Variable>,
     pub expressions: Vec<Expression>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum CallStatement {
     Default(DefaultCallStatement),
     This(ThisCallStatement),
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct DefaultCallStatement {
     pub prefix_expression: Box<PrefixExpression>,
-    pub arguments: Arguments,
+    pub arguments: FunctionArguments,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct ThisCallStatement {
-    pub prefix_expression: Box<PrefixExpression>,
+    pub prefix: Box<PrefixExpression>,
     pub name: NameLiteral,
-    pub arguments: Arguments,
+    pub arguments: FunctionArguments,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct DoStatement {
     pub block: Box<Block>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct WhileStatement {
     pub expression: Box<Expression>,
     pub block: Box<Block>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct RepeatStatement {
     pub expression: Box<Expression>,
     pub block: Box<Block>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct IfStatement {
     pub statement: ConditionalStatement,
     pub else_if_statements: Vec<ConditionalStatement>,
     pub else_statement: Option<ElseStatement>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConditionalStatement {
     pub expression: Box<Expression>,
     pub block: Box<Block>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct ElseStatement {
     pub block: Box<Block>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct ForStatement {
     pub name: NameLiteral,
     pub lower: Box<Expression>,
@@ -101,52 +114,87 @@ pub struct ForStatement {
     pub block: Box<Block>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct ForInStatement {
     pub names: Vec<NameLiteral>,
     pub expressions: Vec<Expression>,
     pub block: Box<Block>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct FunctionStatement {
     pub name: NameLiteral,
     pub body: FunctionBody,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct LocalFunctionStatement {
     pub name: NameLiteral,
     pub body: FunctionBody,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct LocalSetStatement {
     pub names: Vec<NameLiteral>,
     pub expressions: Option<Vec<Expression>>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum LastStatement {
     Return(Vec<Expression>),
     Break,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct FunctionBody {
     pub parameters: Vec<Expression>,
     pub varargs: bool,
     pub block: Box<Block>,
 }
 
-pub enum Arguments {
+#[derive(Debug, Clone, PartialEq)]
+pub enum FunctionArguments {
     List(Vec<Expression>),
     Table(Table),
     String(StringLiteral),
 }
 
-pub struct Table {}
-
-pub enum Variable {
-    Name(NameLiteral),
-    Bracket(Box<PrefixExpression>, Box<Expression>),
-    Dot(Box<PrefixExpression>, NameLiteral),
+#[derive(Debug, Clone, PartialEq)]
+pub struct Table {
+    pub fields: Vec<TableField>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum TableField {
+    Index {
+        key: Box<Expression>,
+        value: Box<Expression>,
+    },
+    Name {
+        key: NameLiteral,
+        value: Box<Expression>,
+    },
+    Expression {
+        value: Box<Expression>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Variable {
+    Name {
+        name: NameLiteral,
+    },
+    Bracket {
+        prefix: Box<PrefixExpression>,
+        key: Box<Expression>,
+    },
+    Dot {
+        prefix: Box<PrefixExpression>,
+        key: NameLiteral,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
     Nil,
     False,
@@ -157,35 +205,80 @@ pub enum Expression {
     Function(FunctionBody),
     Prefix(PrefixExpression),
     Table(Table),
-    Binary,
-    Unary,
+    Binary(BinaryExpression),
+    Unary(UnaryExpression),
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum PrefixExpression {
     Variable(Variable),
     Call(CallStatement),
     Paren(Box<Expression>),
 }
 
-pub struct NameLiteral(String);
+#[derive(Debug, Clone, PartialEq)]
+pub enum BinaryExpressionKind {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulus,
+    Pow,
+    Concat,
+    NotEq,
+    Eq,
+    Less,
+    LessEq,
+    Greater,
+    GreaterEq,
+    And,
+    Or,
+}
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct BinaryExpression {
+    pub kind: BinaryExpressionKind,
+    pub lhs: Box<Expression>,
+    pub rhs: Box<Expression>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UnaryExpressionKind {
+    Not,
+    Negate,
+    Pound,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnaryExpression {
+    pub kind: UnaryExpressionKind,
+    pub inner: Box<Expression>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NameLiteral(pub String);
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct NumberLiteral {
     pub value: f64,
     pub kind: NumberLiteralKind,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum NumberLiteralKind {
     Decimal,
     Hexadecimal,
     Binary,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct StringLiteral {
     pub value: String,
     pub kind: StringLiteralKind,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum StringLiteralKind {
     Short,
-    Long(i32),
+    Long(u32),
 }

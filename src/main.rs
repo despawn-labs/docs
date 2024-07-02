@@ -17,13 +17,9 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     let data = fs::read_to_string(args.input)?;
-    let mut lex = Lex::new(data.into_bytes());
-
-    let mut token = lex.next()?;
-    while token != Token::Eof {
-        println!("{token:?}");
-        token = lex.next()?;
-    }
+    let mut parser = lang::Parser::new(data.into_bytes())?;
+    let mut chunk = parser.parse()?;
+    println!("{:#?}", chunk);
 
     Ok(())
 }
