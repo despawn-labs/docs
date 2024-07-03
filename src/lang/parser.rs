@@ -1,7 +1,6 @@
 use super::{
-    ast,
-    token::{self},
-    Lex, LexError, Token,
+    ast::{self, NameLiteral, Statement, ThisCallStatement},
+    token, Lex, LexError, Token,
 };
 
 #[inline]
@@ -35,6 +34,12 @@ pub enum ParserError {
     #[error("unexpected token: '{token:?}'")]
     UnexpectedToken { token: Token },
 
+    #[error("unexpected statement, block has been terminated")]
+    UnexpectedStatement,
+
+    #[error("unexpected expression, only calls are valid")]
+    UnexpectedExpression,
+
     #[error("missing closing '{end:?}' for '{start:?}' on line {line}")]
     Match { start: Token, end: Token, line: u32 },
 }
@@ -54,7 +59,7 @@ impl Parser {
     }
 
     pub fn parse(&mut self) -> ParserResult<ast::Block> {
-        self.parse_block()
+        self.parse_block(&[])
     }
 
     #[inline]
@@ -76,17 +81,28 @@ impl Parser {
         }
     }
 
-    fn parse_block(&mut self) -> ParserResult<ast::Block> {
+    fn parse_block(&mut self, ending: &[Token]) -> ParserResult<ast::Block> {
         let mut statements = vec![];
 
+        let mut hit_last = false;
+
         loop {
-            if self.lex.token() == Token::End {
-                break;
+            match self.lex.token() {
+                Token::Eof => break,
+                token => {
+                    if ending.iter().find(|tk| **tk == token).is_some() {
+                        break;
+                    }
+                }
+            }
+
+            if hit_last {
+                return Err(ParserError::UnexpectedStatement);
             }
 
             let statement = self.parse_statement()?;
             if statement.is_last() {
-                break;
+                hit_last = true;
             }
 
             statements.push(statement);
@@ -97,22 +113,422 @@ impl Parser {
 
     fn parse_statement(&mut self) -> ParserResult<ast::Statement> {
         match self.lex.token() {
+            Token::Do => Ok(ast::Statement::Do(self.parse_do_statement()?)),
             Token::If => Ok(ast::Statement::If(self.parse_if_statement()?)),
-            _ => panic!(""),
+            Token::For => Ok(self.parse_for_statement()?),
+            Token::Repeat => Ok(ast::Statement::Repeat(self.parse_repeat_statement()?)),
+            Token::While => Ok(ast::Statement::While(self.parse_while_statement()?)),
+            Token::Function => Ok(ast::Statement::Function(self.parse_function_statement()?)),
+            Token::Local => Ok(self.parse_local_statement()?),
+            Token::Return | Token::Break => Ok(ast::Statement::Last(self.parse_last_statement()?)),
+            _ => {
+                let expr = self.parse_expr_suffixed()?;
+
+                match self.lex.token() {
+                    Token::Eq | Token::Comma => {
+                        Ok(ast::Statement::Set(self.parse_set_statement(expr)?))
+                    }
+                    _ => Ok(ast::Statement::Call(self.parse_call_statement(expr)?)),
+                }
+            }
         }
     }
 
     fn parse_if_statement(&mut self) -> ParserResult<ast::IfStatement> {
-        self.lex.next()?;
+        self.lex.next()?; // if
 
-        let expr = self.parse_expr_binary(0)?;
-        println!("{:#?}", expr);
+        let statement = self.parse_then()?;
 
-        todo!();
+        let mut else_if_statements = vec![];
+        let mut else_statement = None;
+
+        loop {
+            match self.lex.token() {
+                Token::ElseIf => {
+                    self.lex.next()?;
+
+                    else_if_statements.push(self.parse_then()?);
+                }
+                Token::Else => {
+                    self.lex.next()?;
+
+                    else_statement = Some(ast::ElseStatement {
+                        block: Box::new(self.parse_block(&[
+                            Token::Else,
+                            Token::ElseIf,
+                            Token::End,
+                        ])?),
+                    });
+                }
+                Token::End => {
+                    self.lex.next()?;
+
+                    break;
+                }
+                _ => {
+                    return Err(ParserError::UnexpectedToken {
+                        token: self.lex.token(),
+                    })
+                }
+            }
+        }
+
+        Ok(ast::IfStatement {
+            statement,
+            else_if_statements,
+            else_statement,
+        })
     }
 
     fn parse_then(&mut self) -> ParserResult<ast::ConditionalStatement> {
-        todo!();
+        let expression = self.parse_expr_binary(0)?;
+
+        self.lex.next()?; // then
+
+        let block = self.parse_block(&[Token::ElseIf, Token::Else, Token::End])?;
+
+        Ok(ast::ConditionalStatement {
+            expression: Box::new(expression),
+            block: Box::new(block),
+        })
+    }
+
+    fn parse_do_statement(&mut self) -> ParserResult<ast::DoStatement> {
+        self.lex.next()?; // do
+
+        let block = self.parse_block(&[Token::End])?;
+
+        self.lex.next()?; // end
+
+        Ok(ast::DoStatement {
+            block: Box::new(block),
+        })
+    }
+
+    fn parse_for_statement(&mut self) -> ParserResult<ast::Statement> {
+        let name_1 = self.lex.next()?; // for
+
+        let name_1 = match name_1 {
+            Token::Name(name) => ast::NameLiteral(name.clone()),
+            token => return Err(ParserError::UnexpectedToken { token }),
+        };
+
+        self.lex.next()?; // name_1
+
+        match self.lex.token() {
+            Token::Assign => Ok(ast::Statement::For(
+                self.parse_numeric_for_statement(name_1)?,
+            )),
+            Token::Comma | Token::In => Ok(ast::Statement::ForIn(
+                self.parse_list_for_statement(name_1)?,
+            )),
+            token => Err(ParserError::UnexpectedToken { token }),
+        }
+    }
+
+    fn parse_numeric_for_statement(
+        &mut self,
+        name: ast::NameLiteral,
+    ) -> ParserResult<ast::ForStatement> {
+        self.lex.next()?; // =
+
+        let index = Box::new(self.parse_expr_binary(0)?);
+
+        self.check(|tk| *tk == Token::Comma)?;
+        self.lex.next()?;
+
+        let limit = Box::new(self.parse_expr_binary(0)?);
+
+        let step = match self.lex.token() {
+            Token::Comma => {
+                self.lex.next()?;
+                Some(Box::new(self.parse_expr_binary(0)?))
+            }
+            _ => None,
+        };
+
+        self.check(|tk| *tk == Token::Do)?;
+        self.lex.next()?; // do
+
+        let block = Box::new(self.parse_block(&[Token::End])?);
+
+        self.lex.next()?; // end
+
+        Ok(ast::ForStatement {
+            name,
+            index,
+            limit,
+            step,
+            block,
+        })
+    }
+
+    fn parse_list_for_statement(
+        &mut self,
+        name: ast::NameLiteral,
+    ) -> ParserResult<ast::ForInStatement> {
+        let mut names = vec![name];
+
+        match self.lex.token() {
+            Token::In => {}
+            Token::Comma => {
+                loop {
+                    self.lex.next()?; // ,
+
+                    match self.lex.token() {
+                        Token::Name(name) => names.push(ast::NameLiteral(name)),
+                        token => return Err(ParserError::UnexpectedToken { token }),
+                    };
+
+                    self.lex.next()?; // name
+
+                    match self.lex.token() {
+                        Token::Comma => {}
+                        Token::In => break,
+                        token => return Err(ParserError::UnexpectedToken { token }),
+                    }
+                }
+            }
+            token => return Err(ParserError::UnexpectedToken { token }),
+        }
+
+        self.lex.next()?; // in
+
+        let expressions = self.parse_expression_list()?;
+
+        self.check(|tk| *tk == Token::Do)?;
+        self.lex.next()?; // do
+
+        let block = Box::new(self.parse_block(&[Token::End])?);
+
+        self.lex.next()?; // end
+
+        Ok(ast::ForInStatement {
+            names,
+            expressions,
+            block,
+        })
+    }
+
+    fn parse_repeat_statement(&mut self) -> ParserResult<ast::RepeatStatement> {
+        self.lex.next()?; // repeat
+
+        let block = Box::new(self.parse_block(&[Token::Until])?);
+
+        self.lex.next()?; // until
+
+        let expression = Box::new(self.parse_expr_binary(0)?);
+
+        Ok(ast::RepeatStatement { block, expression })
+    }
+
+    fn parse_while_statement(&mut self) -> ParserResult<ast::WhileStatement> {
+        self.lex.next()?; // while
+
+        let expression = Box::new(self.parse_expr_binary(0)?);
+
+        self.check(|tk| *tk == Token::Do)?;
+        self.lex.next()?; // do
+
+        let block = Box::new(self.parse_block(&[Token::End])?);
+
+        self.lex.next()?; // end
+
+        Ok(ast::WhileStatement { expression, block })
+    }
+
+    fn parse_function_statement(&mut self) -> ParserResult<ast::FunctionStatement> {
+        self.lex.next()?; // function
+
+        let name = self.parse_function_name()?;
+        let body = self.parse_function_body()?;
+
+        Ok(ast::FunctionStatement { name, body })
+    }
+
+    fn parse_function_name(&mut self) -> ParserResult<ast::FunctionName> {
+        let mut segments = vec![];
+        let mut ending_segment = None;
+
+        loop {
+            match self.lex.token() {
+                Token::Name(name) => segments.push(ast::NameLiteral(name)),
+                token => return Err(ParserError::UnexpectedToken { token }),
+            }
+
+            self.lex.next()?; // name
+
+            match self.lex.token() {
+                Token::Dot => {
+                    self.lex.next()?;
+                } // .
+                _ => break,
+            }
+        }
+
+        match self.lex.token() {
+            Token::Colon => {
+                self.lex.next()?; // :
+
+                match self.lex.token() {
+                    Token::Name(name) => ending_segment = Some(ast::NameLiteral(name)),
+                    token => return Err(ParserError::UnexpectedToken { token }),
+                }
+
+                self.lex.next()?; // name
+            }
+            _ => {}
+        }
+
+        Ok(ast::FunctionName {
+            segments,
+            ending_segment,
+        })
+    }
+
+    fn parse_function_body(&mut self) -> ParserResult<ast::FunctionBody> {
+        let line = self.lex.line_number();
+        self.check(|tk| *tk == Token::LParen)?;
+        self.lex.next()?; // (
+
+        let (parameters, varargs) = match self.lex.token() {
+            Token::RParen => {
+                self.lex.next()?; // )
+                (vec![], false)
+            }
+            _ => {
+                let parameters = self.parse_name_list(true)?;
+                let varargs = match self.lex.token() {
+                    Token::Dots => {
+                        self.lex.next()?; // ...
+                        true
+                    }
+                    _ => false,
+                };
+
+                self.check_match(Token::LParen, Token::RParen, line)?;
+                self.lex.next()?; // )
+                (parameters, varargs)
+            }
+        };
+
+        let block = Box::new(self.parse_block(&[Token::End])?);
+
+        self.lex.next()?; // end
+
+        Ok(ast::FunctionBody {
+            parameters,
+            varargs,
+            block,
+        })
+    }
+
+    fn parse_local_statement(&mut self) -> ParserResult<ast::Statement> {
+        self.lex.next()?; // local
+
+        match self.lex.token() {
+            Token::Function => Ok(ast::Statement::LocalFunction(
+                self.parse_local_function_statement()?,
+            )),
+            _ => Ok(ast::Statement::LocalSet(self.parse_local_set_statement()?)),
+        }
+    }
+
+    fn parse_local_function_statement(&mut self) -> ParserResult<ast::LocalFunctionStatement> {
+        self.lex.next()?; // function
+
+        let name = match self.lex.token() {
+            Token::Name(name) => ast::NameLiteral(name),
+            token => return Err(ParserError::UnexpectedToken { token }),
+        };
+
+        self.lex.next()?; // name
+
+        let body = self.parse_function_body()?;
+
+        Ok(ast::LocalFunctionStatement { name, body })
+    }
+
+    fn parse_local_set_statement(&mut self) -> ParserResult<ast::LocalSetStatement> {
+        let names = self.parse_name_list(false)?;
+
+        let expressions = match self.lex.token() {
+            Token::Assign => {
+                self.lex.next()?; // =
+                Some(self.parse_expression_list()?)
+            }
+            _ => None,
+        };
+
+        Ok(ast::LocalSetStatement { names, expressions })
+    }
+
+    fn parse_set_statement(
+        &mut self,
+        initial_variable: ast::PrefixExpression,
+    ) -> ParserResult<ast::SetStatement> {
+        let mut variables = vec![initial_variable];
+
+        loop {
+            match self.lex.token() {
+                Token::Comma => {
+                    self.lex.next()?;
+                }
+                _ => break,
+            }
+
+            variables.push(self.parse_expr_suffixed()?);
+        }
+
+        self.check(|tk| *tk == Token::Assign)?;
+        self.lex.next()?;
+
+        let expressions = self.parse_expression_list()?;
+
+        Ok(ast::SetStatement {
+            variables,
+            expressions,
+        })
+    }
+
+    fn parse_call_statement(
+        &mut self,
+        prefix_expression: ast::PrefixExpression,
+    ) -> ParserResult<ast::CallStatement> {
+        match self.lex.token() {
+            Token::Colon => {
+                self.lex.next()?; // :
+
+                let name = match self.lex.token() {
+                    Token::Name(name) => ast::NameLiteral(name),
+                    token => return Err(ParserError::UnexpectedToken { token }),
+                };
+
+                self.lex.next()?; // name
+
+                let arguments = self.parse_function_arguments()?;
+
+                Ok(ast::CallStatement::This(ast::ThisCallStatement {
+                    prefix: Box::new(prefix_expression),
+                    name,
+                    arguments,
+                }))
+            }
+            _ => Ok(match prefix_expression {
+                ast::PrefixExpression::Call(inner) => inner,
+                _ => return Err(ParserError::UnexpectedExpression),
+            }),
+        }
+    }
+
+    fn parse_last_statement(&mut self) -> ParserResult<ast::LastStatement> {
+        match self.lex.token() {
+            Token::Break => return Ok(ast::LastStatement::Break),
+            _ => {}
+        }
+
+        let expressions = self.parse_expression_list()?;
+        Ok(ast::LastStatement::Return(expressions))
     }
 
     fn parse_expr_binary(&mut self, min_prec: u8) -> ParserResult<ast::Expression> {
@@ -211,11 +627,11 @@ impl Parser {
             }
             Token::LCurly => return Ok(ast::Expression::Table(self.parse_table()?)),
             Token::Function => todo!(),
-            _ => self.parse_expr_suffixed(),
+            _ => Ok(ast::Expression::Prefix(self.parse_expr_suffixed()?)),
         }
     }
 
-    fn parse_expr_suffixed(&mut self) -> ParserResult<ast::Expression> {
+    fn parse_expr_suffixed(&mut self) -> ParserResult<ast::PrefixExpression> {
         let mut expr = self.parse_expr_prefix()?;
 
         loop {
@@ -294,7 +710,7 @@ impl Parser {
                     ))
                 }
                 _ => {
-                    return Ok(ast::Expression::Prefix(expr));
+                    return Ok(expr);
                 }
             }
         }
@@ -332,7 +748,7 @@ impl Parser {
         match self.lex.token() {
             Token::LParen => {
                 let line = self.lex.line_number();
-                self.lex.next()?;
+                self.lex.next()?; // (
 
                 let arguments = match self.lex.token() {
                     Token::RParen => vec![],
@@ -340,6 +756,7 @@ impl Parser {
                 };
 
                 self.check_match(Token::LParen, Token::RParen, line)?;
+                self.lex.next()?; // )
 
                 Ok(ast::FunctionArguments::List(arguments))
             }
@@ -381,6 +798,33 @@ impl Parser {
         }
 
         Ok(exprs)
+    }
+
+    fn parse_name_list(&mut self, function: bool) -> ParserResult<Vec<ast::NameLiteral>> {
+        let mut names = vec![];
+
+        loop {
+            match self.lex.token() {
+                Token::Name(name) => names.push(ast::NameLiteral(name)),
+                Token::Dots => {
+                    if function {
+                        break;
+                    }
+                }
+                token => return Err(ParserError::UnexpectedToken { token }),
+            }
+
+            self.lex.next()?; // name
+
+            match self.lex.token() {
+                Token::Comma => {}
+                _ => break,
+            }
+
+            self.lex.next()?; // ,
+        }
+
+        Ok(names)
     }
 
     fn parse_table(&mut self) -> ParserResult<ast::Table> {

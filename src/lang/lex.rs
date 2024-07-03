@@ -533,7 +533,6 @@ impl Lex {
                     self.next_char();
 
                     return Ok(if self.char != b':' {
-                        self.next_char();
                         Token::Colon
                     } else {
                         self.next_char();

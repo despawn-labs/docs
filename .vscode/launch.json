@@ -1,0 +1,45 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'despawn-docs'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=despawn-docs",
+          "--package=despawn-docs"
+        ],
+        "filter": {
+          "name": "despawn-docs",
+          "kind": "bin"
+        }
+      },
+      "args": ["-i ../../example_b.lua"],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'despawn-docs'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--bin=despawn-docs",
+          "--package=despawn-docs"
+        ],
+        "filter": {
+          "name": "despawn-docs",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

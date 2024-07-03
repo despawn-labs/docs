@@ -47,7 +47,7 @@ impl Statement {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetStatement {
-    pub variables: Vec<Variable>,
+    pub variables: Vec<PrefixExpression>,
     pub expressions: Vec<Expression>,
 }
 
@@ -108,9 +108,9 @@ pub struct ElseStatement {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForStatement {
     pub name: NameLiteral,
-    pub lower: Box<Expression>,
-    pub upper: Box<Expression>,
-    pub increment: Option<Box<Expression>>,
+    pub index: Box<Expression>,
+    pub limit: Box<Expression>,
+    pub step: Option<Box<Expression>>,
     pub block: Box<Block>,
 }
 
@@ -123,7 +123,7 @@ pub struct ForInStatement {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionStatement {
-    pub name: NameLiteral,
+    pub name: FunctionName,
     pub body: FunctionBody,
 }
 
@@ -131,6 +131,12 @@ pub struct FunctionStatement {
 pub struct LocalFunctionStatement {
     pub name: NameLiteral,
     pub body: FunctionBody,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionName {
+    pub segments: Vec<NameLiteral>,
+    pub ending_segment: Option<NameLiteral>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -147,7 +153,7 @@ pub enum LastStatement {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionBody {
-    pub parameters: Vec<Expression>,
+    pub parameters: Vec<NameLiteral>,
     pub varargs: bool,
     pub block: Box<Block>,
 }
